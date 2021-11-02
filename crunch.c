@@ -33,7 +33,7 @@
  *              if max-len was larger than strlen of the -t parameter crunch would generate
  *                 duplicate words
  *              document some of the code
- *  version 1.5 fixed length and -s parameter.  Before if you did ./crunch 1 3 -s 	
+ *  version 1.5 fixed length and -s parameter.  Before if you did ./crunch 1 3 -s
  *                 you would only get j-z and not j-zzz
  *              converted some fixed length buffers to variable length
  *              added checks to fclose
@@ -145,9 +145,9 @@
  *                 can resume piping crunch into another program
  *  version 3.3 add more information to help section
  *              Fixed mem leaks, invalid comparisons - fixed by JasonC
- *              Error messages and startup summary now go to stderr (-u now 
+ *              Error messages and startup summary now go to stderr (-u now
  *                 unnecessary) - fixed by JasonC
- *              Fixed startup delay due to long sequences of dupe-skipped 
+ *              Fixed startup delay due to long sequences of dupe-skipped
  *                 strings - fixed by JasonC
  *              Added unicode support - written by JasonC
  *              fix write and compress error - reported and fixed by amontero
@@ -266,6 +266,7 @@
 
 static const wchar_t def_low_charset[] = L"abcdefghijklmnopqrstuvwxyz";
 static const wchar_t def_upp_charset[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+static const wchar_t def_alphanumcharset[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 static const wchar_t def_num_charset[] = L"0123456789";
 static const wchar_t def_sym_charset[] = L"!@#$%^&*()-_+=~`[]{}|\\:;\"'<>,.?/ ";
 static const char version[] = "3.6";
@@ -320,15 +321,16 @@ struct pinfo {
 struct opts_struct {
   wchar_t *low_charset;
   wchar_t *upp_charset;
+  wchar_t *alphanumcharset;
   wchar_t *num_charset;
   wchar_t *sym_charset;
-  size_t clen, ulen, nlen, slen;
+  size_t clen, ulen, alen, nlen, slen;
   wchar_t *pattern;
   size_t plen;
   wchar_t *literalstring;
   wchar_t *startstring;
   wchar_t *endstring;
-  size_t duplicates[4]; /* allowed number of duplicates for each charset */
+  size_t duplicates[5]; /* allowed number of duplicates for each charset */
 
   size_t min, max;
 
@@ -412,7 +414,7 @@ int contains_upp128 = 0;
 }
 
 static wchar_t *alloc_wide_string(const char *s, int* r_is_unicode) {
-wchar_t* wstr = NULL;  
+wchar_t* wstr = NULL;
 size_t len = s ? strlen(s)+1 : 1;
 
   wstr = (wchar_t*)malloc(len*sizeof(wchar_t));
@@ -508,6 +510,10 @@ size_t i;
         if (options->literalstring[i] != L',')
           cset = options->upp_charset;
         break;
+      case L'?':
+        if (options->literalstring[i] != L'?')
+          cset = options->alphanumcharset;
+        break;
       case L'%':
         if (options->literalstring[i] != L'%')
           cset = options->num_charset;
@@ -525,7 +531,7 @@ size_t i;
         return 0;
       continue;
     }
-    
+
     while (*cset)
       if (string1[i] == *cset)
         break;
@@ -605,6 +611,12 @@ wchar_t *min_string, *max_string; /* first string of size min, last string of si
           min_string[i] = first_max[i] = options->upp_charset[0];
         }
         break;
+      case L'?':
+        if (options->literalstring[i] != L'?') {
+          max_string[i] = last_min[i] = options->alphanumcharset[options->alen - 1];
+          min_string[i] = first_max[i] = options->alphanumcharset[0];
+        }
+        break;
       case L'%':
         if (options->literalstring[i] != L'%') {
           max_string[i] = last_min[i] = options->num_charset[options->nlen - 1];
@@ -622,7 +634,7 @@ wchar_t *min_string, *max_string; /* first string of size min, last string of si
       }
     }
   }
-  
+
   options->last_min = last_min;
   options->first_max = first_max;
 
@@ -680,6 +692,14 @@ size_t dupes;
             dupes = options->duplicates[1];
           }
           break;
+        case L'?':
+          if (options->literalstring[i] != L'?') {
+            cset = options->alphanumcharset;
+            clen = options->alen;
+            is_fixed = 0;
+            dupes = options->duplicates[1];
+          }
+          break;
         case L'%':
           if (options->literalstring[i] != L'%') {
             cset = options->num_charset;
@@ -717,14 +737,21 @@ size_t dupes;
         cset = options->upp_charset;
         clen = options->ulen;
         dupes = options->duplicates[1];
+
+        if ((index = find_index(cset, clen, options->pattern[i])) == NPOS) {
+          cset = options->alphanumcharset;
+          clen = options->alen;
+          dupes = options->duplicates[2];
+
+
         if ((index = find_index(cset, clen, options->pattern[i])) == NPOS) {
           cset = options->num_charset;
           clen = options->nlen;
-          dupes = options->duplicates[2];
+          dupes = options->duplicates[3];
           if ((index = find_index(cset, clen, options->pattern[i])) == NPOS) {
             cset = options->sym_charset;
             clen = options->slen;
-            dupes = options->duplicates[3];
+            dupes = options->duplicates[4];
             if ((index = find_index(cset, clen, options->pattern[i])) == NPOS) {
               cset = NULL;
               clen = 0;
@@ -732,6 +759,8 @@ size_t dupes;
               index = 0;
             }
           }
+        }
+
         }
       }
       si = ei = index;
@@ -957,6 +986,12 @@ size_t index1, index2;
         if (options.literalstring[temp] != L',') {
           clen = options.ulen;
           cset = options.upp_charset;
+        }
+        break;
+      case L'?':
+        if (options.literalstring[temp] != L'?') {
+          clen = options.alen;
+          cset = options.alphanumcharset;
         }
         break;
       case L'%':
@@ -1211,6 +1246,7 @@ size_t i;
     for (i = 0; i < wcslen(block); i++) {
       if (((options.pattern[i] == L'@') && (inc[i] < options.clen-1) && (options.literalstring[i] != L'@')) || \
           ((options.pattern[i] == L',') && (inc[i] < options.ulen-1) && (options.literalstring[i] != L',')) || \
+          ((options.pattern[i] == L'?') && (inc[i] < options.alen-1) && (options.literalstring[i] != L'?')) || \
           ((options.pattern[i] == L'%') && (inc[i] < options.nlen-1) && (options.literalstring[i] != L'%')) || \
           ((options.pattern[i] == L'^') && (inc[i] < options.slen-1) && (options.literalstring[i] != L'^'))) {
         return 0;
@@ -1223,7 +1259,7 @@ size_t i;
 static int too_many_duplicates(const wchar_t *block, const options_type options) {
 wchar_t current_char = L'\0';
 size_t dupes_seen = 0;
-  
+
   while (*block != L'\0') {
     if (*block == current_char) {
       dupes_seen += 1;
@@ -1237,10 +1273,14 @@ size_t dupes_seen = 0;
           return 1;
       }
       if (dupes_seen > options.duplicates[2]) {
-        if (find_index(options.num_charset, options.nlen, current_char) != NPOS)
+        if (find_index(options.alphanumcharset, options.alen, current_char) != NPOS)
           return 1;
       }
       if (dupes_seen > options.duplicates[3]) {
+        if (find_index(options.num_charset, options.nlen, current_char) != NPOS)
+          return 1;
+      }
+      if (dupes_seen > options.duplicates[4]) {
         if (find_index(options.sym_charset, options.slen, current_char) != NPOS)
           return 1;
       }
@@ -1267,8 +1307,12 @@ size_t consecutive_dupes = 0;
 const wchar_t *matching_set;
 size_t mslen = 0;
 
-  if ((options.low_charset == NULL) || (options.upp_charset == NULL) || (options.num_charset == NULL) || (options.sym_charset == NULL)) {
-     fprintf(stderr,"increment: SOMETHING REALLY BAD HAPPENED\n");
+  if ((options.low_charset == NULL) || (options.upp_charset == NULL) || (options.alphanumcharset == NULL) || (options.num_charset == NULL) || (options.sym_charset == NULL)) {
+    //  fprintf(stderr,"options.low_charset: (%d)\n", options.low_charset);
+    //  fprintf(stderr,"options.upp_charset: (%d)\n", options.upp_charset);
+    //  fprintf(stderr,"options.alphanumcharset: (%d)\n", options.alphanumcharset);
+    //  fprintf(stderr,"options.num_charset: (%d)\n", options.num_charset);
+    //  fprintf(stderr,"options.sym_charset: (%d)\n", options.sym_charset);
      exit(EXIT_FAILURE);
   }
 
@@ -1304,7 +1348,7 @@ size_t mslen = 0;
   }
 
   for (i = start; i != stop; i += step) {
-    if (options.pattern == NULL || (wcschr(L"@,%^",options.pattern[i])!=NULL
+    if (options.pattern == NULL || (wcschr(L"@,?%^",options.pattern[i])!=NULL
         && options.pattern[i]!=options.literalstring[i])) {
 
       if (can_inc_before_violator==0 && inc[i] < options.pattern_info[i].clen-1)
@@ -1359,6 +1403,10 @@ size_t mslen = 0;
         case L',':
           matching_set = options.upp_charset;
           mslen = options.ulen;
+          break;
+        case L'?':
+          matching_set = options.alphanumcharset;
+          mslen = options.alen;
           break;
         case L'%':
           matching_set = options.num_charset;
@@ -1452,7 +1500,7 @@ pid_t pid; /*  pid and pid return */
       exit(EXIT_FAILURE);
     }
   }
-  
+
   compoutput = calloc((end*3)+5+strlen(fpath), sizeof(char)); /* max length will be 3x outname */
   if (newfile == NULL) {
     fprintf(stderr,"rename: can't allocate memory for compoutput\n");
@@ -1569,7 +1617,7 @@ pid_t pid; /*  pid and pid return */
       }
 
       if (strncmp(compressalgo, "lzma", 4) != 0) {
-        if (strncmp(outputfilename, fpath, 5) == 0) 
+        if (strncmp(outputfilename, fpath, 5) == 0)
           status = remove(finalnewfile);
         else
           status = remove(outputfilename);
@@ -1707,6 +1755,10 @@ wchar_t *block2;      /* block is word being created */
                 block2[t] = options.upp_charset[0]; /* placeholder is set so add   character */
                 inc[t] = 0;
                 break;
+              case L'?':
+                block2[t] = options.alphanumcharset[0]; /* placeholder is set so add   character */
+                inc[t] = 0;
+                break;
               case L'%':
                 block2[t] = options.num_charset[0]; /* placeholder is set so add character */
                 inc[t] = 0;
@@ -1732,7 +1784,7 @@ wchar_t *block2;      /* block is word being created */
     }
     else {
       size_t outlen;
-      
+
       if ((fptr = fopen(fpath,"a+")) == NULL) { /* append to file */
         fprintf(stderr,"permute: File START could not be opened\n");
         fprintf(stderr,"The problem is = %s\n", strerror(errno));
@@ -1795,6 +1847,10 @@ wchar_t *block2;      /* block is word being created */
                 break;
               case L',':
                 block2[t] = options.upp_charset[0]; /* placeholder is set so add   character */
+                inc[t] = 0;
+                break;
+              case L'?':
+                block2[t] = options.alphanumcharset[0]; /* placeholder is set so add   character */
                 inc[t] = 0;
                 break;
               case L'%':
@@ -1928,6 +1984,15 @@ size_t k;
             block2[j] = options.pattern[j]; /* add pattern letter to word */
           }
           break;
+        case L'?':
+          if (options.literalstring[j] != L'?') {
+            block2[j] = options.alphanumcharset[0]; /* placeholder is set so add character */
+            inc[j] = 0;
+          }
+          else {
+            block2[j] = options.pattern[j]; /* add pattern letter to word */
+          }
+          break;
         case L'%':
           if (options.literalstring[j] != L'%') {
             block2[j] = options.num_charset[0]; /* placeholder is set so add character */
@@ -1978,6 +2043,17 @@ size_t k;
             block2[j] = startblock[j]; /* pattern is null so add character */
             for(k = 0; k < wcslen(options.upp_charset); k++)
               if (block2[j] == options.upp_charset[k])
+                inc[j] = k;
+          }
+          else {
+            block2[j] = options.pattern[j]; /* add pattern letter to word */
+          }
+        break;
+        case L'?':
+          if (options.literalstring[j] != L'?') {
+            block2[j] = startblock[j]; /* pattern is null so add character */
+            for(k = 0; k < wcslen(options.alphanumcharset); k++)
+              if (block2[j] == options.alphanumcharset[k])
                 inc[j] = k;
           }
           else {
@@ -2347,6 +2423,7 @@ int saw_unicode_input = 0;
 
 wchar_t *charset; /* character set */
 wchar_t *upp_charset = NULL;
+wchar_t *alphanumcharset = NULL;
 wchar_t  *num_charset = NULL;
 wchar_t *sym_charset = NULL;
 wchar_t *startblock = NULL; /* user specified starting point */
@@ -2381,7 +2458,7 @@ pthread_t threads;
     exit(EXIT_FAILURE);
   }
 
-  options.low_charset = options.upp_charset = options.num_charset = options.sym_charset = NULL;
+  options.low_charset = options.upp_charset = options.alphanumcharset = options.num_charset = options.sym_charset = NULL;
   options.pattern = options.literalstring = NULL;
   options.startstring = options.endstring = NULL;
   options.last_min = options.first_max = NULL;
@@ -2414,6 +2491,12 @@ pthread_t threads;
   upp_charset = dupwcs(def_upp_charset);
   if (upp_charset == NULL) {
     fprintf(stderr,"crunch: can't allocate memory for default upp_charset\n");
+    exit(EXIT_FAILURE);
+  }
+
+  alphanumcharset = dupwcs(def_alphanumcharset);
+  if (alphanumcharset == NULL) {
+    fprintf(stderr,"crunch: can't allocate memory for default alphanumcharset\n");
     exit(EXIT_FAILURE);
   }
 
@@ -2601,11 +2684,14 @@ pthread_t threads;
             case ',':
               options.duplicates[1] = dupvalue;
               break;
-            case '%':
+            case '?':
               options.duplicates[2] = dupvalue;
               break;
-            case '^':
+            case '%':
               options.duplicates[3] = dupvalue;
+              break;
+            case '^':
+              options.duplicates[4] = dupvalue;
               break;
             default:
               fprintf(stderr,"the type of duplicates must be one of [@,%%^]\n");
@@ -2955,13 +3041,15 @@ pthread_t threads;
       literalstring[sizectr] = L'-';
     literalstring[max] = L'\0';
   }
-    
+
   options.low_charset = charset;
   options.upp_charset = upp_charset;
+  options.alphanumcharset = alphanumcharset;
   options.num_charset = num_charset;
   options.sym_charset = sym_charset;
   options.clen = charset ? wcslen(charset) : 0;
   options.ulen = upp_charset ? wcslen(upp_charset) : 0;
+  options.alen = alphanumcharset ? wcslen(alphanumcharset) : 0;
   options.nlen = num_charset ? wcslen(num_charset) : 0;
   options.slen = sym_charset ? wcslen(sym_charset) : 0;
   options.pattern = pattern;
@@ -3131,6 +3219,11 @@ pthread_t threads;
             my_thread.finallinecount *= wcslen(upp_charset);
           }
           break;
+        case L'?':
+          if (literalstring[temp] != L'?') {
+            my_thread.finallinecount *= wcslen(alphanumcharset);
+          }
+          break;
         case L'%':
           if (literalstring[temp] != L'%') {
             my_thread.finallinecount *= wcslen(num_charset);
@@ -3161,6 +3254,11 @@ pthread_t threads;
           case L',':
             if (literalstring[temp] != L',') {
               extra_unicode_bytes += (wcstombs(NULL,upp_charset,0)-wcslen(upp_charset))*my_thread.finallinecount/wcslen(upp_charset);
+            }
+            break;
+          case L'?':
+            if (literalstring[temp] != L'?') {
+              extra_unicode_bytes += (wcstombs(NULL,alphanumcharset,0)-wcslen(alphanumcharset))*my_thread.finallinecount/wcslen(alphanumcharset);
             }
             break;
           case L'%':
@@ -3223,6 +3321,7 @@ pthread_t threads;
   free(charsetfilename);
   free(charset);
   free(upp_charset);
+  free(alphanumcharset);
   free(num_charset);
   free(sym_charset);
 
